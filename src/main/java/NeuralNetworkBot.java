@@ -21,6 +21,7 @@ public class NeuralNetworkBot extends TelegramLongPollingBot {
     private Map<Long, Query> queries = new HashMap<>();
     private Map<Long, String> tokens = new HashMap<>();
 
+
     public void onUpdateReceived(Update update) {
         Message message = update.getMessage();
 
@@ -28,6 +29,7 @@ public class NeuralNetworkBot extends TelegramLongPollingBot {
             return;
         }
 
+        //stop command, user wants to reset data
         if (message.hasText() && message.getText().startsWith("/stop")) {
             queries.remove(message.getChatId());
             return;
@@ -36,69 +38,44 @@ public class NeuralNetworkBot extends TelegramLongPollingBot {
         Query currentQuery = queries.getOrDefault(message.getChatId(), null);
 
         if (currentQuery == null && message.hasText()) {
-            if (message.getText().startsWith(Commands.REGISTER.getCommand())) {
-                currentQuery = new RegisterQuery(this::getImageFromResponse,
-                        this::sendImageWithKeyboard, this::downloadImageFromUrl);
-            } else if (message.getText().startsWith(Commands.LOGIN_PHOTO.getCommand())) {
-                currentQuery = new LoginPhotoQuery(this::getImageFromResponse, this::storeToken,
-                        this::sendImageWithKeyboard, this::downloadImageFromUrl);
-            } else if (message.getText().startsWith(Commands.FACES_COORDINATES.getCommand())) {
-                currentQuery = new NotSupportedQuery();
-            } else if (message.getText().startsWith(Commands.EYES_COORDINATES.getCommand())) {
-                currentQuery = new EyesCoordinatesQuery(this::getImageFromResponse,
-                        tokens.getOrDefault(message.getChatId(), ""));
-            } else if (message.getText().startsWith(Commands.HIGHLIGHT_FACES.getCommand())) {
-                currentQuery = new HighlightFacesQuery(this::getImageFromResponse,
-                        tokens.getOrDefault(message.getChatId(), ""));
-            } else if (message.getText().startsWith(Commands.IDENTIFY_GROUP.getCommand())) {
-                currentQuery = new IdentifyGroupQuery(this::getImageFromResponse,
-                        tokens.getOrDefault(message.getChatId(), ""));
-            } else if (message.getText().startsWith(Commands.CROP_FACE.getCommand())) {
-                currentQuery = new CropfaceQuery(this::getImageFromResponse,
-                        tokens.getOrDefault(message.getChatId(), ""));
-            } else if (message.getText().startsWith(Commands.LOGIN.getCommand())) {
-                currentQuery = new LoginQuery((this::storeToken));
-            } else if (message.getText().startsWith(Commands.UPDATE_USER_PHOTO.getCommand())) {
-                currentQuery = new NotSupportedQuery();
+            currentQuery = fromMessage(message.getText(), message.getChatId());
+
+            if (currentQuery != null) {
+                queries.put(message.getChatId(), currentQuery);
+                //starting setup message
+                sendMessage(currentQuery.getStartingHelp(), message.getChatId());
             } else {
                 sendMessage("No such command found", message.getChatId());
-                return;
             }
 
-            queries.put(message.getChatId(), currentQuery);
-            //starting setup message
-            sendMessage(currentQuery.getStartingHelp(), message.getChatId());
             return;
         }
 
 
+        //if no command is avaliable but started not with a command
         if (currentQuery == null) {
             sendMessage("Please start with a command.", message.getChatId());
             return;
         }
 
         if (currentQuery.isValidInputForCurrentAction(message)) {
+            //setting up data for query
+            String helperMessage = currentQuery.action(message);
+
             if (currentQuery.isQueryCompleted()) {
+                //execution of response to server
+                String answer = currentQuery.executeQuery(message);
+                sendResponse(message, currentQuery, answer);
+
                 queries.remove(message.getChatId());
-                throw new IllegalStateException("query at wrong state");
             } else {
-                //setting up data for query
-                String helperMessage = currentQuery.action(message);
-
-                if (currentQuery.isQueryCompleted()) {
-                    //execution of response to server
-                    String answer = currentQuery.executeQuery(message);
-                    sendResponse(message, currentQuery, answer);
-
+                if (helperMessage.startsWith("Aborting")) {
                     queries.remove(message.getChatId());
-                } else {
-                    if (helperMessage.startsWith("Aborting")) {
-                        queries.remove(message.getChatId());
-                    }
-
-                    sendMessage(helperMessage, message.getChatId());
                 }
+
+                sendMessage(helperMessage, message.getChatId());
             }
+
         } else {
             sendMessage("Wrong input for current action", message.getChatId());
         }
@@ -123,6 +100,59 @@ public class NeuralNetworkBot extends TelegramLongPollingBot {
     private boolean storeToken(Long chatId, String token) {
         tokens.put(chatId, token);
         return true;
+    }
+
+
+    private Query fromMessage(String message, Long chatId) {
+        Query currentQuery;
+
+        if (message.startsWith(Commands.REGISTER.getCommand())) {
+            currentQuery = new RegisterQuery(this::getImageFromResponse,
+                    this::sendImageWithKeyboard, this::downloadImageFromUrl);
+        }
+
+        else if (message.startsWith(Commands.LOGIN_PHOTO.getCommand())) {
+            currentQuery = new LoginPhotoQuery(this::getImageFromResponse, this::storeToken,
+                    this::sendImageWithKeyboard, this::downloadImageFromUrl);
+        }
+
+        else if (message.startsWith(Commands.FACES_COORDINATES.getCommand())) {
+            currentQuery = new NotSupportedQuery();
+        }
+
+        else if (message.startsWith(Commands.EYES_COORDINATES.getCommand())) {
+            currentQuery = new EyesCoordinatesQuery(this::getImageFromResponse,
+                    tokens.getOrDefault(chatId, ""));
+        }
+
+        else if (message.startsWith(Commands.HIGHLIGHT_FACES.getCommand())) {
+            currentQuery = new HighlightFacesQuery(this::getImageFromResponse,
+                    tokens.getOrDefault(chatId, ""));
+        }
+
+        else if (message.startsWith(Commands.IDENTIFY_GROUP.getCommand())) {
+            currentQuery = new IdentifyGroupQuery(this::getImageFromResponse,
+                    tokens.getOrDefault(message, ""));
+        }
+
+        else if (message.startsWith(Commands.CROP_FACE.getCommand())) {
+            currentQuery = new CropfaceQuery(this::getImageFromResponse,
+                    tokens.getOrDefault(message, ""));
+        }
+
+        else if (message.startsWith(Commands.LOGIN.getCommand())) {
+            currentQuery = new LoginQuery((this::storeToken));
+        }
+
+        else if (message.startsWith(Commands.UPDATE_USER_PHOTO.getCommand())) {
+            currentQuery = new NotSupportedQuery();
+        }
+
+        else {
+            return null;
+        }
+
+        return currentQuery;
     }
 
 
